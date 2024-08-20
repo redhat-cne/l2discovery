@@ -12,9 +12,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	//nolint:gocritic
-	"unsafe"
+	"unsafe" //nolint:gocritic
 
 	exports "github.com/redhat-cne/l2discovery-exports"
 	"github.com/sirupsen/logrus"
@@ -182,7 +180,7 @@ func sendProbe(iface *exports.Iface) {
 	fd, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, syscall.ETH_P_ALL)
 	defer syscall.Close(fd)
 	if err != nil {
-		logrus.Errorf("Error: " + err.Error())
+		logrus.Errorf("Error: %s", err)
 		return
 	}
 	// for Link aggregation interfaces, use the link aggregated interface to send the probe packets
@@ -204,7 +202,7 @@ func sendProbe(iface *exports.Iface) {
 	logrus.Tracef("Size : %d", size)
 	interf, err := net.InterfaceByName(senderIface)
 	if err != nil {
-		logrus.Errorf("Could not find " + senderIface + " interface")
+		logrus.Errorf("Could not find %v interface", senderIface)
 		return
 	}
 	logrus.Tracef("Interface hw address: %s", iface.IfMac)
