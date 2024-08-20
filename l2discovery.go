@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"net"
 	"os/exec"
@@ -15,6 +14,7 @@ import (
 	"time"
 	"unsafe" //nolint:gocritic
 
+	"github.com/kelseyhightower/envconfig"
 	exports "github.com/redhat-cne/l2discovery-exports"
 	"github.com/sirupsen/logrus"
 )
@@ -90,6 +90,10 @@ const (
 	bondSlave = "bond"
 )
 
+type config struct {
+	AllIFs bool `default:"false"`
+}
+
 type ipOut struct {
 	Ifindex          int           `json:"ifindex"`
 	Ifname           string        `json:"ifname"`
@@ -163,11 +167,14 @@ func RunLocalCommand(command string) (outStr, errStr string, err error) {
 }
 
 func main() {
-	var getRealIf = flag.Bool("p", false, "Get only physical interfaces")
-	flag.Parse()
+	cfg := config{}
+	err := envconfig.Process("l2discovery", &cfg)
+	if err != nil {
+		logrus.Fatal(err.Error())
+	}
 
 	logrus.SetLevel(logrus.FatalLevel)
-	macs, macExist, _ := getIfs(*getRealIf)
+	macs, macExist, _ := getIfs(cfg.AllIFs)
 	MacsPerIface = make(map[string]map[string]*exports.Neighbors)
 	for _, iface := range macs {
 		RecordAllLocal(iface)
@@ -314,7 +321,7 @@ func sendProbeForever(iface *exports.Iface) {
 	}
 }
 
-func getIfs(getRealIf bool) (macs map[string]*exports.Iface, macsExist map[string]bool, err error) {
+func getIfs(allIFs bool) (macs map[string]*exports.Iface, macsExist map[string]bool, err error) {
 	const (
 		ifCommand = "ip -details -json link show"
 	)
@@ -331,7 +338,7 @@ func getIfs(getRealIf bool) (macs map[string]*exports.Iface, macsExist map[strin
 	}
 	for _, aIfRaw := range aIPOut {
 		if aIfRaw.LinkType == "loopback" ||
-			(aIfRaw.Linkinfo.InfoKind != "" && getRealIf) {
+			(aIfRaw.Linkinfo.InfoKind != "" && !allIFs) {
 			continue
 		}
 		address, _ := getPci(aIfRaw.Ifname)
