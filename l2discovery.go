@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net"
 	"os/exec"
@@ -162,8 +163,11 @@ func RunLocalCommand(command string) (outStr, errStr string, err error) {
 }
 
 func main() {
+	var getRealIf = flag.Bool("p", false, "Get only physical interfaces")
+	flag.Parse()
+
 	logrus.SetLevel(logrus.FatalLevel)
-	macs, macExist, _ := getIfs()
+	macs, macExist, _ := getIfs(*getRealIf)
 	MacsPerIface = make(map[string]map[string]*exports.Neighbors)
 	for _, iface := range macs {
 		RecordAllLocal(iface)
@@ -202,7 +206,7 @@ func sendProbe(iface *exports.Iface) {
 	logrus.Tracef("Size : %d", size)
 	interf, err := net.InterfaceByName(senderIface)
 	if err != nil {
-		logrus.Errorf("Could not find %v interface", senderIface)
+		logrus.Errorf("Could not find %s interface", senderIface)
 		return
 	}
 	logrus.Tracef("Interface hw address: %s", iface.IfMac)
@@ -310,7 +314,7 @@ func sendProbeForever(iface *exports.Iface) {
 	}
 }
 
-func getIfs() (macs map[string]*exports.Iface, macsExist map[string]bool, err error) {
+func getIfs(getRealIf bool) (macs map[string]*exports.Iface, macsExist map[string]bool, err error) {
 	const (
 		ifCommand = "ip -details -json link show"
 	)
@@ -327,7 +331,7 @@ func getIfs() (macs map[string]*exports.Iface, macsExist map[string]bool, err er
 	}
 	for _, aIfRaw := range aIPOut {
 		if aIfRaw.LinkType == "loopback" ||
-			aIfRaw.Linkinfo.InfoKind != "" {
+			(aIfRaw.Linkinfo.InfoKind != "" && getRealIf) {
 			continue
 		}
 		address, _ := getPci(aIfRaw.Ifname)
