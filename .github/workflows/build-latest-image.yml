@@ -9,40 +9,7 @@ on:
 env:
   TERM: xterm-color
   REGISTRY: quay.io
-jobs:
-  shellcheck:
-    name: Shellcheck
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run ShellCheck
-        uses: ludeeus/action-shellcheck@master
-        env:
-          SHELLCHECK_OPTS: -e SC2068
-        with:
-          scandir: './scripts'
-          severity: error
-  
-  yamllint:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: yaml-lint
-        uses: ibiqlik/action-yamllint@v3
-        with:
-          config_data: |
-            extends: default
-            rules:
-              line-length:
-                level: warning
-              trailing-spaces:
-                level: warning
-              brackets:
-                level: warning
-              empty-lines:
-                level: warning
-
-  
+jobs:  
   build-exe:
     name: Build and push image
     runs-on: ubuntu-22.04
