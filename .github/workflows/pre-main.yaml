@@ -67,6 +67,7 @@ jobs:
         with:
           dockerfile: Dockerfile
           recursive: true
+          failure-threshold: error
 
       - name: Shfmt
         run: shfmt -d scripts
