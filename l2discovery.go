@@ -16,6 +16,7 @@ import (
 
 	"github.com/kelseyhightower/envconfig"
 	exports "github.com/redhat-cne/l2discovery-exports"
+	"github.com/redhat-cne/l2discovery/pkg/parser"
 	"github.com/sirupsen/logrus"
 )
 
@@ -24,6 +25,8 @@ import (
 #include <stdlib.h>
 #include <linux/if_packet.h>
 #include <sys/socket.h>
+#include <string.h>
+#include <arpa/inet.h>
 
 typedef struct __attribute__((packed))
 {
@@ -87,11 +90,15 @@ int IfaceBind(int fd, int ifindex)
 import "C" //nolint:gocritic
 
 const (
-	bondSlave = "bond"
+	bondSlave    = "bond"
+	chrootPrefix = "chroot /host /usr/sbin/"
 )
 
+var PCIMap map[string]exports.PCIAddress
+
 type config struct {
-	AllIFs bool `default:"false"`
+	AllIFs           bool `default:"false"`
+	UseContainerCmds bool `default:"false"`
 }
 
 type ipOut struct {
@@ -152,7 +159,7 @@ func (frame *Frame) String() string {
 	return fmt.Sprintf("DA=%s SA=%s TYPE=%s", frame.MacDa, frame.MacSa, frame.Type)
 }
 
-func RunLocalCommand(command string) (outStr, errStr string, err error) {
+func runLocalCommand(command string) (outStr, errStr string, err error) {
 	cmd := exec.Command("sh", "-c", command)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -172,9 +179,21 @@ func main() {
 	if err != nil {
 		logrus.Fatal(err.Error())
 	}
+	cmdPrefix := chrootPrefix
+	if cfg.UseContainerCmds {
+		cmdPrefix = ""
+	}
+	logrus.SetLevel(logrus.InfoLevel)
 
-	logrus.SetLevel(logrus.FatalLevel)
-	macs, macExist, _ := getIfs(cfg.AllIFs)
+	err = initPCIMap(cmdPrefix)
+	if err != nil {
+		logrus.Fatalf("could not initialize PCIMap, err: %s", err)
+	}
+	logrus.Infof("PCIMap: %+v", PCIMap)
+	macs, macExist, err := getIfs(cfg, cmdPrefix)
+	if err != nil {
+		logrus.Fatalf("could not get Local interfaces, err: %s", err)
+	}
 	MacsPerIface = make(map[string]map[string]*exports.Neighbors)
 	for _, iface := range macs {
 		RecordAllLocal(iface)
@@ -321,13 +340,14 @@ func sendProbeForever(iface *exports.Iface) {
 	}
 }
 
-func getIfs(allIFs bool) (macs map[string]*exports.Iface, macsExist map[string]bool, err error) {
+func getIfs(cfg config, cmdPrefix string) (macs map[string]*exports.Iface, macsExist map[string]bool, err error) {
 	const (
 		ifCommand = "ip -details -json link show"
 	)
-	stdout, stderr, err := runLocalCommand(ifCommand)
+	stdout, stderr, err := runLocalCommand(cmdPrefix + ifCommand)
 	if err != nil || stderr != "" {
-		return macs, macsExist, fmt.Errorf("could not execute ip command, err=%s stderr=%s", err, stderr)
+		return macs, macsExist, fmt.Errorf("could not execute ip command(%s), err=%s stderr=%s", cmdPrefix+ifCommand,
+			err, stderr)
 	}
 	macs = make(map[string]*exports.Iface)
 	macsExist = make(map[string]bool)
@@ -338,11 +358,20 @@ func getIfs(allIFs bool) (macs map[string]*exports.Iface, macsExist map[string]b
 	}
 	for _, aIfRaw := range aIPOut {
 		if aIfRaw.LinkType == "loopback" ||
-			(aIfRaw.Linkinfo.InfoKind != "" && !allIFs) {
+			(aIfRaw.Linkinfo.InfoKind != "" && !cfg.AllIFs) {
 			continue
 		}
-		address, _ := getPci(aIfRaw.Ifname)
-		ptpCaps, _ := getPtpCaps(aIfRaw.Ifname, runLocalCommand)
+		var address exports.PCIAddress
+		address, err = getPci(aIfRaw.Ifname, cmdPrefix)
+		if err != nil {
+			logrus.Warnf("could not get PCI info err: %s", err)
+			continue
+		}
+		var ptpCaps exports.PTPCaps
+		ptpCaps, err = getPtpCaps(aIfRaw.Ifname, cmdPrefix, runLocalCommand)
+		if err != nil {
+			return macs, macsExist, fmt.Errorf("could not get PTP capabilities info err: %s", err)
+		}
 		aIface := exports.Iface{IfName: aIfRaw.Ifname,
 			IfMac:   exports.Mac{Data: strings.ToUpper(aIfRaw.Address)},
 			IfIndex: aIfRaw.Ifindex,
@@ -356,71 +385,54 @@ func getIfs(allIFs bool) (macs map[string]*exports.Iface, macsExist map[string]b
 	return macs, macsExist, nil
 }
 
-func getPci(ifaceName string) (aPciAddress exports.PCIAddress, err error) {
+func getPci(ifaceName, cmdPrefix string) (aPciAddress exports.PCIAddress, err error) {
 	const (
-		ethtoolBaseCommand  = "ethtool -i"
-		lscpiCommand        = "lspci -vv -s"
-		newLineCharacter    = "\n"
-		emptySpaceSeparator = " "
-		subsystemString     = "Subsystem: "
+		ethtoolBaseCommand = "ethtool -i"
 	)
-	aCommand := fmt.Sprintf("%s %s", ethtoolBaseCommand, ifaceName)
-	stdout, stderr, err := RunLocalCommand(aCommand)
+	aCommand := fmt.Sprintf("%s %s", cmdPrefix+ethtoolBaseCommand, ifaceName)
+	stdout, stderr, err := runLocalCommand(aCommand)
 	if err != nil || stderr != "" {
-		return aPciAddress, fmt.Errorf("could not execute ethtool command, err=%s stderr=%s", err, stderr)
+		return aPciAddress, fmt.Errorf("could not execute ethtool command(%s), err=%s stderr=%s", aCommand, err, stderr)
 	}
-
-	r := regexp.MustCompile(`(?m)bus-info: (.*)\.(\d+)$`)
-	for _, submatches := range r.FindAllStringSubmatchIndex(stdout, -1) {
-
-		aPciAddress.Device = string(r.ExpandString([]byte{}, "$1", stdout, submatches))
-		aPciAddress.Function = string(r.ExpandString([]byte{}, "$2", stdout, submatches))
-	}
-
-	aCommand = fmt.Sprintf("%s %s.%s", lscpiCommand, aPciAddress.Device, aPciAddress.Function)
-	stdout, stderr, err = RunLocalCommand(aCommand)
-	if err != nil || stderr != "" {
-		return aPciAddress, fmt.Errorf("could not execute lspci command, err=%s stderr=%s", err, stderr)
-	}
-
-	description, subsystem, err := parseLspci(stdout)
+	var address, function string
+	address, function, err = parser.ParseEthtool(stdout)
 	if err != nil {
-		return aPciAddress, fmt.Errorf("could not parse lspci output, err=%s", err)
+		return aPciAddress, fmt.Errorf("could not parse output of ethtool command, err=%s", err)
 	}
-	aPciAddress.Description = description
-	aPciAddress.Subsystem = subsystem
-
+	var ok bool
+	if aPciAddress, ok = PCIMap[address+"."+function]; !ok {
+		return aPciAddress, fmt.Errorf("did not find PCI address: %s in PCIMap", address+"."+function)
+	}
 	return aPciAddress, nil
 }
 
-func parseLspci(output string) (description, subsystem string, err error) {
-	const regex = `(?m)\S*\s*(.*)$(?m)\s+Subsystem:\s*(.*)$`
-
-	// Compile the regular expression
-	re := regexp.MustCompile(regex) //nolint:gocritic
-
-	// Find all matches
-	matches := re.FindAllStringSubmatch(output, -1)
-
-	if len(matches) < 1 {
-		return description, subsystem, fmt.Errorf("could not parse lspci output")
+func initPCIMap(cmdPrefix string) error {
+	const lscpiCommand = "lspci -vv -D"
+	stdout, stderr, err := runLocalCommand(cmdPrefix + lscpiCommand)
+	if strings.Contains(stderr, "kmod") {
+		logrus.Warnf("lspci returns kmod error, output should still be usable")
 	}
-	description = matches[0][1]
-	subsystem = matches[0][2]
-	return description, subsystem, nil
+	if err != nil || stderr != "" && !strings.Contains(stderr, "kmod") {
+		return fmt.Errorf("could not execute lspci command(%s), err=%s stderr=%s", cmdPrefix+lscpiCommand, err, stderr)
+	}
+	PCIMap, err = parser.ParseLspci(stdout)
+	if err != nil {
+		return fmt.Errorf("could not parse output of lspci to create PCI Map")
+	}
+	return nil
 }
 
-func getPtpCaps(ifaceName string, runCmd func(command string) (outStr, errStr string, err error)) (aPTPCaps exports.PTPCaps, err error) {
+func getPtpCaps(ifaceName, cmdPrefix string, runCmd func(command string) (outStr, errStr string, err error)) (aPTPCaps exports.PTPCaps, err error) {
 	const (
 		ethtoolBaseCommand = "ethtool -T "
 		hwTxString         = "hardware-transmit"
 		hwRxString         = "hardware-receive"
 		hwRawClock         = "hardware-raw-clock"
 	)
-	aCommand := ethtoolBaseCommand + ifaceName
+	aCommand := cmdPrefix + ethtoolBaseCommand + ifaceName
 	stdout, stderr, err := runCmd(aCommand)
 	if err != nil || stderr != "" {
-		return aPTPCaps, fmt.Errorf("could not execute "+ethtoolBaseCommand+" command, err=%s stderr=%s", err, stderr)
+		return aPTPCaps, fmt.Errorf("could not execute "+aCommand+" command, err=%s stderr=%s", err, stderr)
 	}
 
 	r := regexp.MustCompile(`(?m)(` + hwTxString + `)|(` + hwRxString + `)|(` + hwRawClock + `)$`)
@@ -441,18 +453,4 @@ func getPtpCaps(ifaceName string, runCmd func(command string) (outStr, errStr st
 		}
 	}
 	return aPTPCaps, nil
-}
-
-func runLocalCommand(command string) (outStr, errStr string, err error) {
-	cmd := exec.Command("sh", "-c", command)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err = cmd.Run()
-	if err != nil {
-		return "", "", err
-	}
-	outStr, errStr = stdout.String(), stderr.String()
-	logrus.Tracef("Command %s, STDERR: %s, STDOUT: %s", cmd.String(), errStr, outStr)
-	return outStr, errStr, err
 }
