@@ -365,7 +365,6 @@ func getIfs(cfg config, cmdPrefix string) (macs map[string]*exports.Iface, macsE
 		address, err = getPci(aIfRaw.Ifname, cmdPrefix)
 		if err != nil {
 			logrus.Warnf("could not get PCI info err: %s", err)
-			continue
 		}
 		var ptpCaps exports.PTPCaps
 		ptpCaps, err = getPtpCaps(aIfRaw.Ifname, cmdPrefix, runLocalCommand)
