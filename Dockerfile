@@ -1,5 +1,6 @@
-FROM registry.access.redhat.com/ubi9/ubi:9.4-1181@sha256:1ee4d8c50d14d9c9e9229d9a039d793fcbc9aa803806d194c957a397cf1d2b17
-RUN dnf -y install iputils iproute ethtool pciutils
+FROM registry.access.redhat.com/ubi9/ubi@sha256:9e6a89ab2a9224712391c77fab2ab01009e387aff42854826427aaf18b98b1ff
+RUN dnf -y install iputils iproute ethtool pciutils; dnf clean all
+RUN dnf -y remove python3-setuptools
 COPY l2discovery /usr/bin
 USER 0
 CMD ["/bin/sh", "-c", "/usr/bin/l2discovery"]
