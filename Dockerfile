@@ -1,5 +1,5 @@
 FROM registry.access.redhat.com/ubi9/ubi@sha256:9e6a89ab2a9224712391c77fab2ab01009e387aff42854826427aaf18b98b1ff
-RUN dnf -y --disableplugin=subscription-manager install iputils iproute ethtool pciutils && dnf clean all --disableplugin=subscription-manager
+RUN dnf -y --disableplugin=subscription-manager install iputils iproute ethtool pciutils
 RUN dnf -y --disableplugin=subscription-manager remove python3-setuptools
 COPY l2discovery-linux-amd64 /usr/bin
 COPY l2discovery-linux-arm64 /usr/bin
