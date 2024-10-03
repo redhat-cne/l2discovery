@@ -1,6 +1,6 @@
 #!/bin/sh
 set -x
-VERSION=multi
+VERSION=latest
 IMAGE_NAME=l2discovery
 REPO=quay.io/redhat-cne
 make test
