@@ -52,4 +52,4 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.CERTSUITE_IMAGE_NAME }}:${{ env.CERTSUITE_IMAGE_TAG }}
+            ${{ env.REGISTRY }}/${{ env.L2DISCOVERY_IMAGE_NAME }}:${{ env.L2DISCOVERY_IMAGE_TAG }}
