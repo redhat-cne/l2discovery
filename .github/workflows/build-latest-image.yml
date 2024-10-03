@@ -9,8 +9,6 @@ on:
 env:
   TERM: xterm-color
   REGISTRY: quay.io
-  L2DISCOVERY_IMAGE_NAME: redhat-cne/l2discovery
-  L2DISCOVERY_IMAGE_TAG: latest
 jobs:  
   build-exe:
     name: Build and push image
@@ -33,12 +31,21 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
-        
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db # v3.6.1
-  
+      - name: Cross building images
+        uses: crazy-max/ghaction-xgo@v3
+        with:
+          xgo_version: latest
+          go_version: 1.22
+          dest: build
+          prefix: myapp
+          targets: linux/amd64,linux/arm64
+          v: true
+          x: false
+          race: false
+          ldflags: -s -w
+          buildmode: default
+          trimpath: true
+          
       - name: Authenticate against Quay.io
         if: ${{ github.ref == 'refs/heads/main' && github.repository_owner == 'redhat-cne' }}
         uses: docker/login-action@v3
@@ -49,13 +56,6 @@ jobs:
           username: ${{ secrets.QUAY_ROBOT_USERNAME }}
           password: ${{ secrets.QUAY_ROBOT_TOKEN }}
 
-      - name: Build and push the latest images for multi-arch
-        uses: docker/build-push-action@32945a339266b759abcbdc89316275140b0fc960 # v6.8.0
+      - name: Build and push image
         if: ${{ github.ref == 'refs/heads/main' && github.repository_owner == 'redhat-cne' }}
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.L2DISCOVERY_IMAGE_NAME }}:${{ env.L2DISCOVERY_IMAGE_TAG }}
+        run: ./scripts/image.sh
