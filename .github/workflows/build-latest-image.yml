@@ -9,6 +9,8 @@ on:
 env:
   TERM: xterm-color
   REGISTRY: quay.io
+  L2DISCOVERY_IMAGE_NAME: redhat-cne/l2discovery
+  L2DISCOVERY_IMAGE_TAG: latest
 jobs:  
   build-exe:
     name: Build and push image
@@ -41,6 +43,13 @@ jobs:
           username: ${{ secrets.QUAY_ROBOT_USERNAME }}
           password: ${{ secrets.QUAY_ROBOT_TOKEN }}
 
-      - name: Build and push image
+      - name: Build and push the latest images for multi-arch
+        uses: docker/build-push-action@32945a339266b759abcbdc89316275140b0fc960 # v6.8.0
         if: ${{ github.ref == 'refs/heads/main' && github.repository_owner == 'redhat-cne' }}
-        run: ./scripts/image.sh
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.CERTSUITE_IMAGE_NAME }}:${{ env.CERTSUITE_IMAGE_TAG }}
