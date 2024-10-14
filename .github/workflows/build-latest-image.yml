@@ -36,7 +36,7 @@ jobs:
         with:
           xgo_version: latest
           go_version: 1.22
-          dest: .
+          dest: github/redhat-cne
           prefix: l2discovery
           targets: linux/amd64,linux/arm64
           v: true
@@ -58,4 +58,4 @@ jobs:
 
       - name: Build and push image
         if: ${{ github.ref == 'refs/heads/main' && github.repository_owner == 'redhat-cne' }}
-        run: ./scripts/image.sh
+        run: ./scripts/image.sh ci
